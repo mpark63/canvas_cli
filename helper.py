@@ -14,6 +14,10 @@ headers = {'Authorization': 'Bearer 13044~SGDZzzWSvytpvQXcIEhtzqCIdSq4I0CtUcbqVa
 def getResponse(url): 
     s = requests.Session() 
     res = s.get(url, headers = headers)
+    if res.status_code == 401:
+        print('401 unauthorized. Please check request headers.')
+    if res.status_code == 404:
+        print('404 Not found. Please check your URL.\n', url)
     parsed = json.loads(res.content)
     return parsed
 
