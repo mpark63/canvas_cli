@@ -6,6 +6,7 @@ from tabulate import tabulate
 import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime
+import sys
 
 url = "https://jhu.instructure.com/api/v1/courses/"
 
@@ -16,8 +17,13 @@ def getResponse(url):
     res = s.get(url, headers = headers)
     if res.status_code == 401:
         print('401 unauthorized. Please check request headers.')
-    if res.status_code == 404:
+        sys.exit()
+    elif res.status_code == 404:
         print('404 Not found. Please check your URL.\n', url)
+        sys.exit()
+    elif res.status_code != 200: 
+        print(res.status_code)
+        sys.exit()
     parsed = json.loads(res.content)
     return parsed
 
