@@ -11,9 +11,11 @@ import sys
 
 s = requests.Session() 
 url = "https://jhu.instructure.com/api/v1/courses/"
-headers = {'Authorization': 'Bearer 13044~SGDZzzWSvytpvQXcIEhtzqCIdSq4I0CtUcbqVaI8mK1GBihXsD9sm2yJ8qjtYa6Y'}
 
-def getResponse(url): 
+def getCourses(headers): 
+    return getResponse("https://jhu.instructure.com/api/v1/courses", headers)
+
+def getResponse(url, headers): 
     res = s.get(url, headers = headers)
     if res.status_code == 401:
         print('401 unauthorized. Please check request headers.', url)
@@ -27,9 +29,9 @@ def getResponse(url):
     parsed = json.loads(res.content)
     return parsed
 
-def getAssignmentGroups(course): 
+def getAssignmentGroups(course, headers): 
     groups_url = url+str(course)+'/assignment_groups'
-    groups = getResponse(groups_url)
+    groups = getResponse(groups_url, headers)
     res = []
     for assignment_group in groups: 
         res.append({
@@ -38,9 +40,9 @@ def getAssignmentGroups(course):
         })
     return res 
 
-def getQuizStats(course): 
+def getQuizStats(course, headers): 
     quizzes_url = url+str(course)+'/quizzes'
-    quizzes = getResponse(quizzes_url)
+    quizzes = getResponse(quizzes_url, headers)
     quizzes.sort(key=lambda quiz: (quiz['due_at'] == None, quiz['due_at']))
     data = {}
     ids = []
@@ -58,7 +60,7 @@ def getQuizStats(course):
         ids.append(quiz['id'])
         names.append(quiz['title'])
         due_dates.append(quiz['due_at'])
-        stats = getResponse(quiz['quiz_statistics_url'])
+        stats = getResponse(quiz['quiz_statistics_url'], headers)
         average = stats['quiz_statistics'][0]['submission_statistics']['score_average']
         averages.append(average)
         stdev = stats['quiz_statistics'][0]['submission_statistics']['score_stdev']
@@ -74,8 +76,8 @@ def getQuizStats(course):
 # def getQuizStatsAcrossSections(assignments): 
 #     # TODO
 
-def getRecentAssignmentsStats(course): 
-    assignments = getResponse(url+str(course)+'/analytics/assignments')
+def getRecentAssignmentsStats(course, headers): 
+    assignments = getResponse(url+str(course)+'/analytics/assignments', headers)
     data = {}
     ids = []
     names = []
@@ -128,8 +130,8 @@ def getRecentAssignmentsStatsAcrossCourses(assignments):
     df = pd.DataFrame(data)
     print(tabulate(df, headers = 'keys', tablefmt = 'simple'))
 
-def getAllAssignments(course):
-    assignments = getResponse(url+str(course)+'/analytics/assignments')
+def getAllAssignments(course, headers):
+    assignments = getResponse(url+str(course)+'/analytics/assignments', headers)
     res = []
     for assignment in assignments: 
         due_date = None
@@ -147,9 +149,9 @@ def getAllAssignments(course):
     # res.sort(key=lambda assignment: (assignment['due_at'] == None, assignment['due_at']))
     return res 
 
-def getAssignmentsByGroup(course, group):
+def getAssignmentsByGroup(course, group, headers):
     assignments_url = url+str(course)+'/assignment_groups/'+str(group)+'/assignments?order_by=due_at'
-    assignments = getResponse(assignments_url)
+    assignments = getResponse(assignments_url, headers)
     res = []
     for assignment in assignments: 
         due_date = None
@@ -163,12 +165,12 @@ def getAssignmentsByGroup(course, group):
     return res
     # print(json.dumps(parsed, indent=4, sort_keys=True))
 
-def getGradingProgress(course, assignment): 
+def getGradingProgress(course, assignment, headers): 
     submissions_url = url+course+'/assignments/'+str(assignment)+'/submission_summary'
-    grading = getResponse(submissions_url)
+    grading = getResponse(submissions_url, headers)
     return grading
 
-def displayGradingProgress(course, assignments): 
+def displayGradingProgress(course, assignments, headers): 
     results = {}
     category_names = ['graded', 'ungraded', 'not_submitted']
     for assignment in assignments:
@@ -176,7 +178,7 @@ def displayGradingProgress(course, assignments):
         if assignment['due_at'] != None: 
             due_date = '\n' + assignment['due_at'].strftime("%m/%d/%Y, %H:%M:%S")
         name = assignment['name'] + due_date
-        status = getGradingProgress(str(course), assignment['id'])
+        status = getGradingProgress(str(course), assignment['id'], headers)
         results[name] = list(status.values())
     surveyGradingProgress(results, category_names)
     plt.show()
