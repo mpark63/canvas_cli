@@ -6,10 +6,17 @@ from tabulate import tabulate
 import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime
+from datetime import date
 from datetime import timedelta
 import sys
+import os
+from pathlib import Path
+from pltHelper import *
 
+assignment_scores = {}
+section_scores = {}
 s = requests.Session() 
+headers = {'Authorization': "Bearer 13044~SGDZzzWSvytpvQXcIEhtzqCIdSq4I0CtUcbqVaI8mK1GBihXsD9sm2yJ8qjtYa6Y"}
 url = "https://jhu.instructure.com/api/v1/courses/"
 
 def getCourses(headers): 
@@ -131,23 +138,19 @@ def getRecentAssignmentsStatsAcrossCourses(assignments):
     print(tabulate(df, headers = 'keys', tablefmt = 'simple'))
 
 def getAllAssignments(course, headers):
-    assignments = getResponse(url+str(course)+'/analytics/assignments', headers)
-    res = []
+    assignments = getResponse(url+str(course)+'/assignments?per_page=100', headers)
+    assignments.sort(key=lambda assignment: (assignment['due_at'] == None, assignment['due_at']))
+    return assignments 
+
+def getAllAssignmentsStats(course, headers):
+    assignments = getResponse(url+str(course)+'/analytics/assignments?per_page=100', headers)
     for assignment in assignments: 
         due_date = None
         if assignment['due_at'] != None: 
             due_date = datetime.strptime(assignment['due_at'], '%Y-%m-%dT%H:%M:%SZ')
-        res.append({
-            "id": assignment['assignment_id'], 
-            "due_at": due_date, 
-            "name": assignment['title'],
-            'first_quartile': assignment['first_quartile'], 
-            'median': assignment['median'], 
-            'third_quartile': assignment['third_quartile'],
-            'min_score': assignment['min_score'],
-        })
+            assignment['due_at'] = due_date
     # res.sort(key=lambda assignment: (assignment['due_at'] == None, assignment['due_at']))
-    return res 
+    return assignments 
 
 def getAssignmentsByGroup(course, group, headers):
     assignments_url = url+str(course)+'/assignment_groups/'+str(group)+'/assignments?order_by=due_at'
@@ -170,6 +173,11 @@ def getGradingProgress(course, assignment, headers):
     grading = getResponse(submissions_url, headers)
     return grading
 
+def getScores(course, assignment, headers): 
+    submissions_url = url+course+'/assignments/'+str(assignment)+'/submissions?per_page=50'
+    submissions = getResponse(submissions_url, headers)
+    return submissions
+
 def displayGradingProgress(course, assignments, headers): 
     results = {}
     category_names = ['graded', 'ungraded', 'not_submitted']
@@ -183,47 +191,158 @@ def displayGradingProgress(course, assignments, headers):
     surveyGradingProgress(results, category_names)
     plt.show()
 
-def displayGradingProgressAcrossSections(assignments): 
+def textReport(course_name, course_num): 
+    print('---' + course_name + '---\n\n')
+    print('\n')
+    
+
+def getSubmissions(course, course_num): 
+    assignments = getAllAssignments(course, headers)
     results = {}
+    for assignment in assignments:
+        if assignment['has_submitted_submissions']: 
+            name = assignment['name']
+            submissions = getScores(course, assignment['id'], headers)
+            for submission in submissions:
+                score = submission['score']
+                if score == None: 
+                    continue
+                assignment_scores[name] = assignment_scores.get(name, {})
+                assignment_scores[name][score] = assignment_scores[name].get(score, 0) + 1
+                if assignment['course_id'] == int(course_num): 
+                    section_scores[name] = section_scores.get(name, {})
+                    section_scores[name][score] = section_scores[name].get(score, 0) + 1
+
+def setup(f, course_name): 
+    f.write("\documentclass{article}\n")
+    f.write(r"\usepackage[hidelinks]{hyperref}" + "\n")
+    f.write(r"\usepackage{graphicx}" + "\n")
+    f.write(r"\usepackage{booktabs}" + "\n")  # for df.to_latex()
+    f.write(r"\usepackage{caption}" + "\n")
+    f.write(r"\usepackage{subfig}" + "\n")
+    f.write(r"\usepackage[top=1in, bottom=1in, left=1in, right=1in, "+
+            "marginparsep=0.15in]{geometry}" + "\n")
+    f.write(r"\title{" + course_name + r" Grading Report}" + "\n")
+    f.write(r"\date{"+ date.today().strftime("%m/%d/%Y") + r"}" + "\n")
+    f.write(r"\author{}" + "\n")
+    f.write(r"\begin{document} \maketitle" + "\n")
+
+def writeGradingProgress(f, course_num, headers):
+    f.write(r"\section{Grading Progress}" + "\n")
+    # -- Set up figure data
+    assignments = getAllAssignmentsStats(course_num, headers)
+    results = {}
+    toReturn = []
+    for assignment in assignments:
+        if assignment['min_score'] != None: 
+            toReturn.append(assignment)
+            name = assignment['title']
+            status = getGradingProgress(course_num, assignment['assignment_id'], headers)
+            results[name] = list(status.values())
     category_names = ['graded', 'ungraded', 'not_submitted']
-    for assignment in assignments: 
-        due_date = ''
-        if assignment['due_at'] != None: 
-            due_date = '\n' + assignment['due_at'].strftime("%m/%d/%Y, %H:%M:%S")
-        name = 'Section ' + str(assignment['section'])
-        status = getGradingProgress(str(assignment['course_id']), assignment['id'])
-        results[name] = list(status.values())
-    print(results)
+    # -- Create figure
     surveyGradingProgress(results, category_names)
-    plt.show()
+    # -- Save figure
+    figname = "Grading Progress"
+    plt.savefig('tex/fig/'+figname+'.png', bbox_inches='tight', dpi=300)
+    # -- Insert figure into LaTeX
+    fwidth = 6   # figure width in inches
+    f.write(r"\includegraphics[width="+str(fwidth)+"in]{fig/"+figname+r".png}\\"+"\n")
+    plt.clf() 
+    return toReturn
 
-def surveyGradingProgress(results, category_names):
-    # https://matplotlib.org/3.1.1/gallery/lines_bars_and_markers/horizontal_barchart_distribution.html
-    labels = list(results.keys())
-    data = np.array(list(results.values()))
-    data_cum = data.cumsum(axis=1)
-    category_colors = plt.get_cmap('RdYlGn')(
-        np.linspace(0.3, 0.85, data.shape[1]))
+def writeAssignment(f, course_num, assignment_name, assignment_num):
+    f.write(r"\section{" + assignment_name + "}" + "\n")
+    status = getGradingProgress(course_num, assignment_num, headers)
+    f.write(r'' + str(status['graded']) + ' graded' + "\n")
+    f.write(r'' + str(status['ungraded']) + ' ungraded' + "\n")
+    f.write(r'' + str(status['not_submitted']) + ' unsumbitted' + "\n")
 
-    fig, ax = plt.subplots(figsize=(8, 5))
-    ax.invert_yaxis()
-    ax.xaxis.set_visible(False)
-    ax.set_xlim(0, np.sum(data, axis=1).max())
+def writeDistribution(f, course_num, assignment_name, max): 
+    f.write(r"\subsection{Grading Distribution}" + "\n")
+    st = 1
+    if max < 10: 
+        st = 1
+    elif max < 20: 
+        st = 2
+    elif max < 50: 
+        st = 5
+    else: 
+        st = 10
 
-    for i, (colname, color) in enumerate(zip(category_names, category_colors)):
-        widths = data[:, i]
-        starts = data_cum[:, i] - widths
-        ax.barh(labels, widths, left=starts, height=0.5,
-                label=colname, color=color)
-        xcenters = starts + widths / 2
+    fig, axes = plt.subplots(1,2,figsize=(8,3))
 
-        r, g, b, _ = color
-        text_color = 'white' if r * g * b < 0.5 else 'darkgrey'
-        for y, (x, c) in enumerate(zip(xcenters, widths)):
-            if c == 0:  
+    plt.sca(axes[0])
+    plt.xlim(-1, max + 1)
+    plt.xticks(np.arange(0, max+1, st))
+    plt.xlabel('Score')
+    plt.ylabel('Frequency')
+    figname = assignment_name+'_all'
+    data = assignment_scores[assignment_name]
+    axes[0].bar(data.keys(), data.values())
+    fig.savefig('tex/fig/'+figname + '.png', bbox_inches='tight', dpi=300)
+    # surveyDistribution(f, data, max, figname)
+
+    plt.sca(axes[1])
+    plt.xlim(-1, max + 1)
+    plt.xticks(np.arange(0, max+1, st))
+    plt.xlabel('Score')
+    plt.ylabel('Frequency')
+    figname = assignment_name+'_specific'
+    data = section_scores[assignment_name]
+    axes[1].bar(data.keys(), data.values())
+    fig.savefig('tex/fig/'+figname + '.png', bbox_inches='tight', dpi=300)
+    fwidth = 6   # figure width in inches
+    f.write(r"\includegraphics[width="+str(fwidth)+"in]{fig/"+figname+r".png}\\")
+    # surveyDistribution(f, data, max, figname)
+    plt.clf() 
+    mean_all = mean(assignment_scores[assignment_name])
+    mean_spec = mean(section_scores[assignment_name])
+    std_all = std(assignment_scores[assignment_name], mean_all) ** .5
+    std_spec = std(assignment_scores[assignment_name], mean_spec) ** .5
+    f.write(r'Average: ' + str("{:.2f}".format(mean_all)) + "\n")
+    f.write(r'Average: ' + str("{:.2f}".format(mean_spec)) + "\n")
+    f.write(r'\linebreak' + "\n")
+    f.write(r'Standard deviation: ' + str("{:.2f}".format(std_all)) + "\n")
+    f.write(r'Standard deviation: ' + str("{:.2f}".format(std_spec)) + "\n")
+    f.write(r'\linebreak' + "\n")
+    
+def mean(dict): 
+    sum = 0
+    count = 0
+    for k, v in dict.items(): 
+        sum += k * v
+        count += v
+    if count == 0: return -1 
+    return sum / count
+
+def std(dict, mean): 
+    sum = 0
+    count = 0
+    for k, v in dict.items(): 
+        sum += v * k**2
+        count += v
+    if count == 0 or count == 1: return -1
+    return (sum - count * mean**2) / (count - 1)
+
+def closeFile(f, latexFileName): 
+    f.write("\end{document}")
+    f.close()
+    os.system("pdflatex -output-directory=tex "+latexFileName)
+
+def writeFile(courses, course_num, course_name, headers): 
+    for course in courses: 
+        getSubmissions(course, course_num)
+    Path("./tex/fig").mkdir(parents=True, exist_ok=True)
+    latexFileName = "tex/" + course_num + ".tex"
+    f = open(latexFileName, "w")
+    setup(f, course_name)
+    assignments = writeGradingProgress(f, course_num, headers)
+    for assignment in assignments: 
+        if assignment['title'] in section_scores: 
+            max = int(assignment['points_possible'])
+            if max == 0: 
                 continue
-            ax.text(x, y, str(int(c)), ha='center', va='center',
-                    color=text_color)
-    ax.legend(ncol=len(category_names), bbox_to_anchor=(0, 1),
-              loc='lower left', fontsize='x-small')
-    return fig, ax
+            writeAssignment(f, course_num, assignment['title'], assignment['assignment_id'])
+            writeDistribution(f, course_num, assignment['title'], max)
+    closeFile(f, latexFileName)

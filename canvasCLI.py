@@ -1,4 +1,5 @@
 from helper import *
+from pltHelper import *
 import inquirer
 
 headers = {}
@@ -6,7 +7,7 @@ course_num = 1234
 course_names = []
 menu = True 
 
-def inputAuthorization(): 
+def inputAuthorization(headers): 
     access_code = input("Canvas access code: ")
     headers['Authorization'] = 'Bearer ' + access_code
     courses = getCourses(headers)
@@ -50,7 +51,7 @@ def submenu():
     ])
     submenu = answers['menu']
     if submenu == menu_choices[0]: 
-        assignments = getAllAssignments(course_num, headers)
+        assignments = getAllAssignmentsStats(course_num, headers)
         displayGradingProgress(course_num, assignments, headers)
     elif submenu == menu_choices[1]: 
         groupMenu()
@@ -78,7 +79,7 @@ def groupMenu():
     assignments = getAssignmentsByGroup(course_num, group_id, headers)
     displayGradingProgress(course_num, assignments, headers)
 
-inputAuthorization()
+inputAuthorization(headers)
 course_num = welcomeMenu()
 while (menu): 
     submenu()
