@@ -75,7 +75,9 @@ def welcomeMenu():
         ])
         course_name = answers['course']
         selected_course = courses[course_name]
+        course_nums = list(selected_course['ids'].items())
         sections = selected_course['sections']
+        sections.append("All sections")
         answers = inquirer.prompt([
             inquirer.List(
                 "section",
@@ -83,11 +85,18 @@ def welcomeMenu():
                 choices=sections,
             ),
         ])
-        course_num = selected_course['ids'][answers['section']]
+        section_num  = str(answers['section'])
+        if section_num == 'All sections': 
+            course_num = None
+            course_name += ' - All Sections'
+        else: 
+            course_num = selected_course['ids'][answers['section']]
+            course_name += ' Section ' + section_num
     else: 
         course_num = input('Course number:\t')
         course_num = course_num.strip()
-    return course_name, course_num
+        course_name = '' + course_num
+    return course_name, course_nums, course_num, section_num
 
 def formatMenu(): 
     answers = inquirer.prompt([
@@ -100,9 +109,9 @@ def formatMenu():
     return answers['format'] == 'PDF'
 
 inputAuthorization()
-[course_name, course_num] = welcomeMenu()
+[course_name, course_nums, course_num, section_num] = welcomeMenu()
 isPDF = formatMenu()
 if (isPDF): 
-    writeFile(courses[course_name]['ids'].values(), course_num, course_name, headers)
+    writeFile(course_nums, course_num, course_name, section_num, headers)
 else: 
     textReport(course_name, course_num)

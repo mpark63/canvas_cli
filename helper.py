@@ -1,5 +1,6 @@
 import requests
 import json
+import time
 from pprint import pprint
 import pandas as pd
 from tabulate import tabulate
@@ -16,7 +17,6 @@ from pltHelper import *
 assignment_scores = {}
 section_scores = {}
 s = requests.Session() 
-headers = {'Authorization': "Bearer 13044~SGDZzzWSvytpvQXcIEhtzqCIdSq4I0CtUcbqVaI8mK1GBihXsD9sm2yJ8qjtYa6Y"}
 url = "https://jhu.instructure.com/api/v1/courses/"
 
 def getCourses(headers): 
@@ -196,9 +196,8 @@ def textReport(course_name, course_num):
     print('\n')
     
 
-def getSubmissions(course, course_num): 
+def getSubmissions(course, headers): 
     assignments = getAllAssignments(course, headers)
-    results = {}
     for assignment in assignments:
         if assignment['has_submitted_submissions']: 
             name = assignment['name']
@@ -209,26 +208,27 @@ def getSubmissions(course, course_num):
                     continue
                 assignment_scores[name] = assignment_scores.get(name, {})
                 assignment_scores[name][score] = assignment_scores[name].get(score, 0) + 1
-                if assignment['course_id'] == int(course_num): 
-                    section_scores[name] = section_scores.get(name, {})
-                    section_scores[name][score] = section_scores[name].get(score, 0) + 1
+                section_scores[course] = section_scores.get(course, {})
+                section_scores[course][name] = section_scores[course].get(name, {})
+                section_scores[course][name][score] = section_scores[course][name].get(score, 0) + 1
 
 def setup(f, course_name): 
     f.write("\documentclass{article}\n")
     f.write(r"\usepackage[hidelinks]{hyperref}" + "\n")
     f.write(r"\usepackage{graphicx}" + "\n")
+    f.write(r"\usepackage{ragged2e}" + "\n")
     f.write(r"\usepackage{booktabs}" + "\n")  # for df.to_latex()
     f.write(r"\usepackage{caption}" + "\n")
     f.write(r"\usepackage{subfig}" + "\n")
     f.write(r"\usepackage[top=1in, bottom=1in, left=1in, right=1in, "+
             "marginparsep=0.15in]{geometry}" + "\n")
-    f.write(r"\title{" + course_name + r" Grading Report}" + "\n")
-    f.write(r"\date{"+ date.today().strftime("%m/%d/%Y") + r"}" + "\n")
+    f.write(r"\title{" + course_name + "\n" + r" Grading Report}" + "\n")
+    f.write(r"\date{"+ datetime.now().strftime("%m/%d/%Y, %H:%M:%S EDT") + r"}" + "\n")
     f.write(r"\author{}" + "\n")
     f.write(r"\begin{document} \maketitle" + "\n")
 
-def writeGradingProgress(f, course_num, headers):
-    f.write(r"\section{Grading Progress}" + "\n")
+def writeGradingProgress(f, course_num, section, headers):
+    f.write(r"\subsection{Section " + str(section) + "}" + "\n")
     # -- Set up figure data
     assignments = getAllAssignmentsStats(course_num, headers)
     results = {}
@@ -243,16 +243,21 @@ def writeGradingProgress(f, course_num, headers):
     # -- Create figure
     surveyGradingProgress(results, category_names)
     # -- Save figure
-    figname = "Grading Progress"
+    figname = "Grading Progress - " + str(section)
     plt.savefig('tex/fig/'+figname+'.png', bbox_inches='tight', dpi=300)
-    # -- Insert figure into LaTeX
-    fwidth = 6   # figure width in inches
-    f.write(r"\includegraphics[width="+str(fwidth)+"in]{fig/"+figname+r".png}\\"+"\n")
     plt.clf() 
+    # -- Insert figure into LaTeX
+    f.write(r"\includegraphics[width=6in]{fig/"+figname+r".png}" + "\n")
     return toReturn
 
-def writeAssignment(f, course_num, assignment_name, assignment_num):
+def writeAssignment(f, course_num, assignment_name, assignment_num, headers):
     f.write(r"\section{" + assignment_name + "}" + "\n")
+    status = getGradingProgress(course_num, assignment_num, headers)
+    f.write(r'' + str(status['graded']) + ' graded' + "\n")
+    f.write(r'' + str(status['ungraded']) + ' ungraded' + "\n")
+    f.write(r'' + str(status['not_submitted']) + ' unsumbitted' + "\n")
+
+def writeOneGradingProgress(f, course_num, assignment_num, headers):
     status = getGradingProgress(course_num, assignment_num, headers)
     f.write(r'' + str(status['graded']) + ' graded' + "\n")
     f.write(r'' + str(status['ungraded']) + ' ungraded' + "\n")
@@ -289,24 +294,59 @@ def writeDistribution(f, course_num, assignment_name, max):
     plt.xlabel('Score')
     plt.ylabel('Frequency')
     figname = assignment_name+'_specific'
-    data = section_scores[assignment_name]
+    data = section_scores[course_num][assignment_name]
     axes[1].bar(data.keys(), data.values())
     fig.savefig('tex/fig/'+figname + '.png', bbox_inches='tight', dpi=300)
-    fwidth = 6   # figure width in inches
-    f.write(r"\includegraphics[width="+str(fwidth)+"in]{fig/"+figname+r".png}\\")
+    f.write(r"\includegraphics[width=6in]{fig/"+figname+r".png}" + "\n")
     # surveyDistribution(f, data, max, figname)
     plt.clf() 
     mean_all = mean(assignment_scores[assignment_name])
-    mean_spec = mean(section_scores[assignment_name])
+    mean_spec = mean(section_scores[course_num][assignment_name])
     std_all = std(assignment_scores[assignment_name], mean_all) ** .5
-    std_spec = std(assignment_scores[assignment_name], mean_spec) ** .5
+    std_spec = std(section_scores[course_num][assignment_name], mean_spec) ** .5
     f.write(r'Average: ' + str("{:.2f}".format(mean_all)) + "\n")
     f.write(r'Average: ' + str("{:.2f}".format(mean_spec)) + "\n")
     f.write(r'\linebreak' + "\n")
     f.write(r'Standard deviation: ' + str("{:.2f}".format(std_all)) + "\n")
     f.write(r'Standard deviation: ' + str("{:.2f}".format(std_spec)) + "\n")
     f.write(r'\linebreak' + "\n")
-    
+
+def writeOneDistribution(f, fig, course_num, section, assignment_name, max, index): 
+    st = 1
+    if max < 10: 
+        st = 1
+    elif max < 20: 
+        st = 2
+    elif max < 50: 
+        st = 5
+    else: 
+        st = 10
+
+    ax = fig.add_subplot(3, 2, index)
+    ax.yaxis.get_major_locator().set_params(integer=True)
+
+    plt.sca(ax)
+    plt.xlim(-1, max + 1)
+    plt.xticks(np.arange(0, max+1, st))
+    ax.set_ylabel('Frequency')
+    figname = assignment_name
+    if index == 1: 
+        data = assignment_scores[assignment_name]
+    else: 
+        data = section_scores[course_num][assignment_name]
+    ax.bar(data.keys(), data.values())
+    ax.set_title(section)
+
+    mean_spec = mean(data)
+    std_spec = std(data, mean_spec) ** .5
+    f.write(r'\linebreak' + "\n")
+    f.write(r'' + section + "\n")
+    f.write(r'\linebreak' + "\n")
+    f.write(r'Average: ' + str("{:.2f}".format(mean_spec)) + "\n")
+    f.write(r'\linebreak' + "\n")
+    f.write(r'Standard deviation: ' + str("{:.2f}".format(std_spec)) + "\n")
+    f.write(r'\linebreak' + "\n")
+
 def mean(dict): 
     sum = 0
     count = 0
@@ -326,23 +366,76 @@ def std(dict, mean):
     return (sum - count * mean**2) / (count - 1)
 
 def closeFile(f, latexFileName): 
-    f.write("\end{document}")
+    f.write(r"\end{document}")
     f.close()
     os.system("pdflatex -output-directory=tex "+latexFileName)
 
-def writeFile(courses, course_num, course_name, headers): 
-    for course in courses: 
-        getSubmissions(course, course_num)
+def writeFile(courses, course_num, course_name, section_num, headers): 
+    start = time.perf_counter()
+    print("Pulling submission data from Canvas API... ")
+    for section, course in courses: 
+        getSubmissions(course, headers)
+    end = time.perf_counter()
+    print(end - start, "s\n")
     Path("./tex/fig").mkdir(parents=True, exist_ok=True)
-    latexFileName = "tex/" + course_num + ".tex"
+    latexFileName = "tex/" + course_name.replace(' ', '_') + ".tex"
     f = open(latexFileName, "w")
     setup(f, course_name)
-    assignments = writeGradingProgress(f, course_num, headers)
-    for assignment in assignments: 
-        if assignment['title'] in section_scores: 
+    if course_num != None: 
+        assignments = writeGradingProgress(f, course_num, section_num, headers)
+        # if None, write all in one doc 
+        for assignment in assignments: 
+            if assignment['title'] in section_scores[course_num]: 
+                max = int(assignment['points_possible'])
+                if max == 0: 
+                    continue
+                writeAssignment(f, course_num, assignment['title'], assignment['assignment_id'], headers)
+                writeDistribution(f, course_num, assignment['title'], max)
+    else: 
+        f.write(r"\section{Grading Progress}" + "\n")
+        start = time.perf_counter()
+        print("Surveying grading progress from Canvas API... ")
+        for section, course in courses: 
+            assignments = writeGradingProgress(f, course, section, headers)
+            course_num = course
+        end = time.perf_counter()
+        print(end - start, "s\n")
+        start = time.perf_counter()
+        print("Creating grade distribution bar charts... ")
+        for assignment in assignments: 
+            fig = plt.figure(figsize=(8,12))
             max = int(assignment['points_possible'])
             if max == 0: 
                 continue
-            writeAssignment(f, course_num, assignment['title'], assignment['assignment_id'])
-            writeDistribution(f, course_num, assignment['title'], max)
+            f.write(r"\section{" + assignment['title'] + "}" + "\n")
+            f.write(r"\begin{FlushLeft}" + "\n")
+            if assignment['title'] in assignment_scores: 
+                writeOneDistribution(f, fig, course_num, 'All sections', assignment['title'], max, 1)
+            else: 
+                continue
+            fn = 1
+            index = 2
+            for section, course in courses: 
+                if index == 7: 
+                    figname = str(assignment['assignment_id']) + "_" + str(fn)
+                    fig.savefig('tex/fig/'+figname + '.png', bbox_inches='tight', dpi=300)
+                    plt.clf() 
+                    fig = plt.figure(figsize=(8,12))
+                    index = 1
+                    fn += 1
+                if assignment['title'] in section_scores[course]: 
+                    writeOneDistribution(f, fig, course, 'Section ' + str(section), assignment['title'], max, index)
+                    index += 1
+            if index != 1: 
+                figname = str(assignment['assignment_id']) + "_" + str(fn)
+                fig.savefig('tex/fig/'+figname + '.png', bbox_inches='tight', dpi=300)
+            plt.clf() 
+            mean_all = mean(assignment_scores[assignment['title']])
+            std_all = std(assignment_scores[assignment['title']], mean_all) ** .5
+            f.write(r"\end{FlushLeft}" + "\n")
+            for i in range(1, fn + 1): 
+                f.write(r"\includegraphics[width=6in]{fig/"+str(assignment['assignment_id']) + "_" + str(i) + r".png}" + "\n")
+                f.write(r'\linebreak' + "\n")
+        end = time.perf_counter()
+        print(end - start, "s\n")
     closeFile(f, latexFileName)
