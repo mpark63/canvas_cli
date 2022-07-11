@@ -1,6 +1,7 @@
 from helper import *
 from pltHelper import *
 import inquirer
+import asyncio
 
 headers = {}
 course_name = ''
@@ -98,20 +99,12 @@ def welcomeMenu():
         course_name = '' + course_num
     return course_name, course_nums, course_num, section_num
 
-def formatMenu(): 
-    answers = inquirer.prompt([
-        inquirer.List(
-            "format",
-            message="Select a format for your course summary ",
-            choices=['Text', 'PDF'],
-        ),
-    ])
-    return answers['format'] == 'PDF'
+async def main():
+    inputAuthorization()
+    [course_name, course_nums, course_num, section_num] = welcomeMenu()
+    await writeFile(course_nums, course_num, course_name, section_num, headers)
 
-inputAuthorization()
-[course_name, course_nums, course_num, section_num] = welcomeMenu()
-isPDF = formatMenu()
-if (isPDF): 
-    writeFile(course_nums, course_num, course_name, section_num, headers)
-else: 
-    textReport(course_name, course_num)
+if __name__ == "__main__":
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(main())
+    loop.close()
