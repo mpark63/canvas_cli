@@ -1,9 +1,8 @@
 import requests
 import json
 import time
-from pprint import pprint
-import pandas as pd
-from tabulate import tabulate
+import asyncio
+from aiohttp import ClientSession
 import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime
@@ -13,32 +12,35 @@ import sys
 import os
 from pathlib import Path
 from pltHelper import *
+plt.rcParams.update({'figure.max_open_warning': 0})
 
 assignment_scores = {}
 section_scores = {}
+grading_progress = {}
 s = requests.Session() 
 url = "https://jhu.instructure.com/api/v1/courses/"
 
-def getCourses(headers): 
-    return getResponse(url, headers)
+async def getCourses(headers): 
+    return await getResponse(url, headers)
 
-def getResponse(url, headers): 
-    res = s.get(url, headers = headers)
-    if res.status_code == 401:
-        print('401 unauthorized. Please check request headers.', url)
-        sys.exit()
-    elif res.status_code == 404:
-        print('404 Not found. Please check your URL.\n', url)
-        sys.exit()
-    elif res.status_code != 200: 
-        print(res.status_code, url)
-        sys.exit()
-    parsed = json.loads(res.content)
+async def getResponse(url, headers): 
+    async with ClientSession() as session:
+        async with session.get(url, headers = headers) as res:  
+            if res.status == 401:
+                print('401 unauthorized. Please check request headers.', url)
+                sys.exit()
+            elif res.status == 404:
+                print('404 Not found. Please check your URL.\n', url)
+                sys.exit()
+            elif res.status != 200: 
+                sys.exit()
+            text = await res.text()
+            parsed = json.loads(text)
     return parsed
 
-def getAssignmentGroups(course, headers): 
+async def getAssignmentGroups(course, headers): 
     groups_url = url+str(course)+'/assignment_groups'
-    groups = getResponse(groups_url, headers)
+    groups = await getResponse(groups_url, headers)
     res = []
     for assignment_group in groups: 
         res.append({
@@ -47,46 +49,8 @@ def getAssignmentGroups(course, headers):
         })
     return res 
 
-def getQuizStats(course, headers): 
-    quizzes_url = url+str(course)+'/quizzes'
-    quizzes = getResponse(quizzes_url, headers)
-    quizzes.sort(key=lambda quiz: (quiz['due_at'] == None, quiz['due_at']))
-    data = {}
-    ids = []
-    names = []
-    due_dates = []
-    averages = []
-    stdevs = []
-
-    for quiz in quizzes: 
-        if quiz['due_at'] == None: 
-            break
-        due_date = datetime.strptime(quiz['due_at'], '%Y-%m-%dT%H:%M:%SZ')
-        if due_date > datetime.now() + timedelta(days=3): 
-            break
-        ids.append(quiz['id'])
-        names.append(quiz['title'])
-        due_dates.append(quiz['due_at'])
-        stats = getResponse(quiz['quiz_statistics_url'], headers)
-        average = stats['quiz_statistics'][0]['submission_statistics']['score_average']
-        averages.append(average)
-        stdev = stats['quiz_statistics'][0]['submission_statistics']['score_stdev']
-        stdevs.append(stdev)
-    data["Id"] = ids
-    data["Title"] = names
-    data["Due"] = due_dates
-    data["Mean"] = averages
-    data["StDev"] = stdevs
-    df = pd.DataFrame(data)
-    print(tabulate(df, headers = 'keys', tablefmt = 'simple'))
-
-def getAllAssignments(course, headers):
-    assignments = getResponse(url+str(course)+'/assignments?per_page=100', headers)
-    assignments.sort(key=lambda assignment: (assignment['due_at'] == None, assignment['due_at']))
-    return assignments 
-
-def getAllAssignmentsStats(course, headers):
-    assignments = getResponse(url+str(course)+'/analytics/assignments?per_page=100', headers)
+async def getAllAssignmentsStats(course, headers):
+    assignments = await getResponse(url+str(course)+'/analytics/assignments?per_page=100', headers)
     for assignment in assignments: 
         due_date = None
         if assignment['due_at'] != None: 
@@ -95,38 +59,43 @@ def getAllAssignmentsStats(course, headers):
     # res.sort(key=lambda assignment: (assignment['due_at'] == None, assignment['due_at']))
     return assignments 
 
-def getGradingProgress(course, assignment, headers): 
+async def getGradingProgress(course, assignment, headers): 
     submissions_url = url+course+'/assignments/'+str(assignment)+'/submission_summary'
-    grading = getResponse(submissions_url, headers)
+    grading = await getResponse(submissions_url, headers)
     return grading
 
-def getScores(course, assignment, headers): 
+async def getScores(course, assignment, headers): 
     submissions_url = url+course+'/assignments/'+str(assignment)+'/submissions?per_page=50'
-    submissions = getResponse(submissions_url, headers)
+    submissions = await getResponse(submissions_url, headers)
     return submissions
 
-def textReport(course_name, course_num): 
-    print('---' + course_name + '---\n\n')
-    print('\n')
-    
+async def getSubmissions(course, headers): 
+    assignments = await getAllAssignmentsStats(course, headers)
+    tasks1 = [asyncio.create_task(storeGradingProgress(course, assignment['assignment_id'], assignment['title'], headers)) for assignment in assignments] 
+    await asyncio.gather(*tasks1) 
+    tasks2 = [asyncio.create_task(storeScores(course, assignment, headers)) for assignment in assignments] 
+    await asyncio.gather(*tasks2) 
 
-def getSubmissions(course, headers): 
-    assignments = getAllAssignments(course, headers)
-    for assignment in assignments:
-        name = assignment['name']
-        if assignment['has_submitted_submissions']: 
-            submissions = getScores(course, assignment['id'], headers)
-            for submission in submissions:
-                score = submission['score']
-                if score == None: 
-                    continue
-                assignment_scores[name] = assignment_scores.get(name, {})
-                assignment_scores[name][score] = assignment_scores[name].get(score, 0) + 1
-                section_scores[course] = section_scores.get(course, {})
-                section_scores[course][name] = section_scores[course].get(name, {})
-                section_scores[course][name][score] = section_scores[course][name].get(score, 0) + 1
-        else: 
-            assignment_scores[name] = {}
+async def storeGradingProgress(course, id, name, headers): 
+    status = await getGradingProgress(course, id, headers)
+    grading_progress[course] = grading_progress.get(course, {})
+    grading_progress[course][name] = list(status.values())
+
+async def storeScores(course, assignment, headers): 
+    name = assignment['title']
+    if assignment['max_score'] != None: 
+        submissions = await getScores(course, assignment['assignment_id'], headers)
+        for submission in submissions:
+            score = submission['score']
+            if score == None: 
+                continue
+            assignment_scores[name] = assignment_scores.get(name, {})
+            assignment_scores[name][score] = assignment_scores[name].get(score, 0) + 1
+            section_scores[course] = section_scores.get(course, {})
+            section_scores[course][name] = section_scores[course].get(name, {})
+            section_scores[course][name][score] = section_scores[course][name].get(score, 0) + 1
+    else: 
+        assignment_scores[name] = {}
 
 def setup(f, course_name): 
     f.write("\documentclass{article}\n")
@@ -143,38 +112,28 @@ def setup(f, course_name):
     f.write(r"\author{}" + "\n")
     f.write(r"\begin{document} \maketitle" + "\n")
 
-def writeGradingProgress(f, course_num, section, headers):
-    f.write(r"\subsection{Section " + str(section) + "}" + "\n")
+def writeGradingProgress(f, course_num, section):
     # -- Set up figure data
-    assignments = getAllAssignmentsStats(course_num, headers)
-    results = {}
-    toReturn = []
-    for assignment in assignments:
-        toReturn.append(assignment)
-        if assignment['min_score'] != None: 
-            name = assignment['title']
-            status = getGradingProgress(course_num, assignment['assignment_id'], headers)
-            results[name] = list(status.values())
     category_names = ['graded', 'ungraded', 'not_submitted']
     # -- Create figure
-    surveyGradingProgress(results, category_names)
+    surveyGradingProgress(grading_progress[course_num], category_names)
     # -- Save figure
     figname = "Grading Progress - " + str(section)
     plt.savefig('tex/fig/'+figname+'.png', bbox_inches='tight', dpi=300)
     plt.clf() 
     # -- Insert figure into LaTeX
+    f.write(r"\subsection{Section " + str(section) + "}" + "\n")
     f.write(r"\includegraphics[width=6in]{fig/"+figname+r".png}" + "\n")
-    return toReturn
 
-def writeAssignment(f, course_num, assignment_name, assignment_num, headers):
+async def writeAssignment(f, course_num, assignment_name, assignment_num, headers):
     f.write(r"\section{" + assignment_name + "}" + "\n")
-    status = getGradingProgress(course_num, assignment_num, headers)
+    status = await getGradingProgress(course_num, assignment_num, headers)
     f.write(r'' + str(status['graded']) + ' graded' + "\n")
     f.write(r'' + str(status['ungraded']) + ' ungraded' + "\n")
     f.write(r'' + str(status['not_submitted']) + ' unsumbitted' + "\n")
 
-def writeOneGradingProgress(f, course_num, assignment_num, headers):
-    status = getGradingProgress(course_num, assignment_num, headers)
+async def writeOneGradingProgress(f, course_num, assignment_num, headers):
+    status = await getGradingProgress(course_num, assignment_num, headers)
     f.write(r'' + str(status['graded']) + ' graded' + "\n")
     f.write(r'' + str(status['ungraded']) + ' ungraded' + "\n")
     f.write(r'' + str(status['not_submitted']) + ' unsumbitted' + "\n")
@@ -288,21 +247,67 @@ def std(dict, mean):
 def closeFile(f, latexFileName): 
     f.write(r"\end{document}")
     f.close()
-    os.system("pdflatex -output-directory=tex "+latexFileName)
+    os.system("pdflatex -output-directory=tex --interaction=batchmode "+latexFileName)
 
-def writeFile(courses, course_num, course_name, section_num, headers): 
+async def assignmentBySection(f, course_num, courses, assignment): 
+    fig = plt.figure(figsize=(8,12))
+    f.write(r"\section{" + assignment['title'] + "}" + "\n")
+    f.write(r"\begin{FlushLeft}" + "\n")
+    if assignment['due_at'] != None:
+        due_date = '\n' + assignment['due_at'].strftime("%m/%d/%Y, %H:%M:%S")
+        f.write(r'\linebreak' + "\n")
+        f.write(r"" + due_date + "\n")
+    if assignment['title'] in assignment_scores: 
+        if int(assignment['points_possible']) == 0: 
+            f.write(r"Current max score set to null." + "\n")
+            return
+        elif assignment_scores[assignment['title']] == {}: 
+            f.write(r"No grade data." + "\n")
+            return
+        else: 
+            writeOneDistribution(f, fig, course_num, 'All sections', assignment['title'], assignment['points_possible'], 1)
+    else: 
+        return
+    fn = 1
+    index = 2
+    for section, course in courses: 
+        if index == 7: 
+            figname = str(assignment['assignment_id']) + "_" + str(fn)
+            fig.savefig('tex/fig/'+figname + '.png', bbox_inches='tight', dpi=300)
+            plt.clf() 
+            fig = plt.figure(figsize=(8,12))
+            index = 1
+            fn += 1
+        if assignment['title'] in section_scores[course]: 
+            writeOneDistribution(f, fig, course, 'Section ' + str(section), assignment['title'], assignment['points_possible'], index)
+            index += 1
+    if index != 1: 
+        figname = str(assignment['assignment_id']) + "_" + str(fn)
+        fig.savefig('tex/fig/'+figname + '.png', bbox_inches='tight', dpi=300)
+    plt.clf() 
+    mean_all = mean(assignment_scores[assignment['title']])
+    std_all = std(assignment_scores[assignment['title']], mean_all) ** .5
+    f.write(r"\end{FlushLeft}" + "\n")
+    for i in range(1, fn + 1): 
+        f.write(r"\includegraphics[width=6in]{fig/"+str(assignment['assignment_id']) + "_" + str(i) + r".png}" + "\n")
+        f.write(r'\linebreak' + "\n")
+    plt.close(fig)
+
+async def writeFile(courses, course_num, course_name, section_num, headers): 
     start = time.perf_counter()
     print("Pulling submission data from Canvas API... ")
-    for section, course in courses: 
-        getSubmissions(course, headers)
+    tasks = [asyncio.create_task(getSubmissions(course, headers)) for section, course in courses] 
+    await asyncio.gather(*tasks)  
     end = time.perf_counter()
     print(end - start, "s\n")
     Path("./tex/fig").mkdir(parents=True, exist_ok=True)
     latexFileName = "tex/" + course_name.replace(' ', '_') + ".tex"
     f = open(latexFileName, "w")
     setup(f, course_name)
+    f.write(r"\section{Grading Progress}" + "\n")
     if course_num != None: 
-        assignments = writeGradingProgress(f, course_num, section_num, headers)
+        writeGradingProgress(f, course_num, section_num)
+        assignments = getAllAssignmentsStats(course_num, headers)
         # if None, write all in one doc 
         for assignment in assignments: 
             if assignment['title'] in section_scores[course_num]: 
@@ -319,61 +324,19 @@ def writeFile(courses, course_num, course_name, section_num, headers):
                     continue
                 writeDistribution(f, course_num, assignment['title'], max)
     else: 
-        f.write(r"\section{Grading Progress}" + "\n")
         start = time.perf_counter()
         print("Surveying grading progress from Canvas API... ")
         for section, course in courses: 
-            assignments = writeGradingProgress(f, course, section, headers)
-            course_num = course
+            writeGradingProgress(f, course, section)
+        course_num = courses[0][1]
+        assignments = await getAllAssignmentsStats(course_num, headers)
         end = time.perf_counter()
         print(end - start, "s\n")
         start = time.perf_counter()
         print("Creating grade distribution bar charts... ")
-        for assignment in assignments: 
-            fig = plt.figure(figsize=(8,12))
-            max = int(assignment['points_possible'])
-            if max == 0: 
-                continue
-            f.write(r"\section{" + assignment['title'] + "}" + "\n")
-            f.write(r"\begin{FlushLeft}" + "\n")
-            if assignment['due_at'] != None:
-                due_date = '\n' + assignment['due_at'].strftime("%m/%d/%Y, %H:%M:%S")
-                f.write(r'\linebreak' + "\n")
-                f.write(r"" + due_date + "\n")
-            if assignment['title'] in assignment_scores: 
-                if int(assignment['points_possible']) == 0: 
-                    f.write(r"Current max score set to null." + "\n")
-                    continue
-                elif assignment_scores[assignment['title']] == {}: 
-                    f.write(r"No grade data." + "\n")
-                    continue
-                else: 
-                    writeOneDistribution(f, fig, course_num, 'All sections', assignment['title'], max, 1)
-            else: 
-                continue
-            fn = 1
-            index = 2
-            for section, course in courses: 
-                if index == 7: 
-                    figname = str(assignment['assignment_id']) + "_" + str(fn)
-                    fig.savefig('tex/fig/'+figname + '.png', bbox_inches='tight', dpi=300)
-                    plt.clf() 
-                    fig = plt.figure(figsize=(8,12))
-                    index = 1
-                    fn += 1
-                if assignment['title'] in section_scores[course]: 
-                    writeOneDistribution(f, fig, course, 'Section ' + str(section), assignment['title'], max, index)
-                    index += 1
-            if index != 1: 
-                figname = str(assignment['assignment_id']) + "_" + str(fn)
-                fig.savefig('tex/fig/'+figname + '.png', bbox_inches='tight', dpi=300)
-            plt.clf() 
-            mean_all = mean(assignment_scores[assignment['title']])
-            std_all = std(assignment_scores[assignment['title']], mean_all) ** .5
-            f.write(r"\end{FlushLeft}" + "\n")
-            for i in range(1, fn + 1): 
-                f.write(r"\includegraphics[width=6in]{fig/"+str(assignment['assignment_id']) + "_" + str(i) + r".png}" + "\n")
-                f.write(r'\linebreak' + "\n")
+        tasks = [asyncio.create_task(assignmentBySection(f, course_num, courses, assignment)) for assignment in assignments] 
+        await asyncio.gather(*tasks)  
         end = time.perf_counter()
         print(end - start, "s\n")
     closeFile(f, latexFileName)
+    print("\nSuccessfully generated\t" + latexFileName + "!")

@@ -5,12 +5,16 @@ import matplotlib.pyplot as plt
 def surveyGradingProgress(results, category_names):
     # https://matplotlib.org/3.1.1/gallery/lines_bars_and_markers/horizontal_barchart_distribution.html
     labels = list(results.keys())
+    if len(results) > 20: 
+        height = 8
+    else: 
+        height = 15
     data = np.array(list(results.values()))
     data_cum = data.cumsum(axis=1)
     category_colors = plt.get_cmap('RdYlGn')(
         np.linspace(0.3, 0.85, data.shape[1]))
 
-    fig, ax = plt.subplots(figsize=(8, 5))
+    fig, ax = plt.subplots(figsize=(8, height))
     ax.invert_yaxis()
     ax.xaxis.set_visible(False)
     ax.set_xlim(0, np.sum(data, axis=1).max())
@@ -32,15 +36,3 @@ def surveyGradingProgress(results, category_names):
     ax.legend(ncol=len(category_names), bbox_to_anchor=(0, 1),
               loc='lower left', fontsize='x-small')
     return fig, ax
-
-def surveyDistribution(f, data, max, axs, figname): 
-    plt.hist(data, bins=max)
-    plt.xlim(0, max)
-    plt.xlabel('Score')
-    plt.ylabel('Frequency')
-
-    plt.savefig('tex/fig/'+figname + '.png', bbox_inches='tight', dpi=300)
-    # -- Insert figure into LaTeX
-    fwidth = 3   # figure width in inches
-    f.write(r"\includegraphics[width="+str(fwidth)+"in]{fig/"+figname+r".png}\\")
-    plt.clf() 
