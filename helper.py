@@ -20,7 +20,7 @@ s = requests.Session()
 url = "https://jhu.instructure.com/api/v1/courses/"
 
 def getCourses(headers): 
-    return getResponse("https://jhu.instructure.com/api/v1/courses", headers)
+    return getResponse(url, headers)
 
 def getResponse(url, headers): 
     res = s.get(url, headers = headers)
@@ -80,63 +80,6 @@ def getQuizStats(course, headers):
     df = pd.DataFrame(data)
     print(tabulate(df, headers = 'keys', tablefmt = 'simple'))
 
-# def getQuizStatsAcrossSections(assignments): 
-#     # TODO
-
-def getRecentAssignmentsStats(course, headers): 
-    assignments = getResponse(url+str(course)+'/analytics/assignments', headers)
-    data = {}
-    ids = []
-    names = []
-    due_dates = []
-    first = []
-    second = []
-    third = []
-    for assignment in assignments: 
-        due_date = None
-        if assignment['due_at'] != None: 
-            due_date = datetime.strptime(assignment['due_at'], '%Y-%m-%dT%H:%M:%SZ')
-        if assignment['min_score'] != None: 
-            ids.append(assignment['assignment_id'])
-            names.append(assignment['title'])
-            due_dates.append(assignment['due_at'])
-            first.append(assignment['first_quartile'])
-            second.append(assignment['median'])
-            third.append(assignment['third_quartile'])
-    data["Id"] = ids
-    data["Title"] = names
-    data["Due"] = due_dates
-    data["25%"] = first
-    data["50%"] = second
-    data["75%"] = third
-    df = pd.DataFrame(data)
-    print(tabulate(df, headers = 'keys', tablefmt = 'simple'))
-
-def getRecentAssignmentsStatsAcrossCourses(assignments): 
-    data = {}
-    ids = []
-    names = []
-    due_dates = []
-    first = []
-    second = []
-    third = []
-    for assignment in assignments: 
-        if assignment['min_score'] != None: 
-            ids.append(assignment['id'])
-            names.append(assignment['name'])
-            due_dates.append(assignment['due_at'])
-            first.append(assignment['first_quartile'])
-            second.append(assignment['median'])
-            third.append(assignment['third_quartile'])
-    data["Id"] = ids
-    data["Title"] = names
-    data["Due"] = due_dates
-    data["25%"] = first
-    data["50%"] = second
-    data["75%"] = third
-    df = pd.DataFrame(data)
-    print(tabulate(df, headers = 'keys', tablefmt = 'simple'))
-
 def getAllAssignments(course, headers):
     assignments = getResponse(url+str(course)+'/assignments?per_page=100', headers)
     assignments.sort(key=lambda assignment: (assignment['due_at'] == None, assignment['due_at']))
@@ -152,22 +95,6 @@ def getAllAssignmentsStats(course, headers):
     # res.sort(key=lambda assignment: (assignment['due_at'] == None, assignment['due_at']))
     return assignments 
 
-def getAssignmentsByGroup(course, group, headers):
-    assignments_url = url+str(course)+'/assignment_groups/'+str(group)+'/assignments?order_by=due_at'
-    assignments = getResponse(assignments_url, headers)
-    res = []
-    for assignment in assignments: 
-        due_date = None
-        if assignment['due_at'] != None: 
-            due_date = datetime.strptime(assignment['due_at'], '%Y-%m-%dT%H:%M:%SZ')
-        res.append({
-            "id": assignment['id'], 
-            "due_at": due_date, 
-            "name": assignment['name']
-        })
-    return res
-    # print(json.dumps(parsed, indent=4, sort_keys=True))
-
 def getGradingProgress(course, assignment, headers): 
     submissions_url = url+course+'/assignments/'+str(assignment)+'/submission_summary'
     grading = getResponse(submissions_url, headers)
@@ -178,19 +105,6 @@ def getScores(course, assignment, headers):
     submissions = getResponse(submissions_url, headers)
     return submissions
 
-def displayGradingProgress(course, assignments, headers): 
-    results = {}
-    category_names = ['graded', 'ungraded', 'not_submitted']
-    for assignment in assignments:
-        due_date = ''
-        if assignment['due_at'] != None: 
-            due_date = '\n' + assignment['due_at'].strftime("%m/%d/%Y, %H:%M:%S")
-        name = assignment['name'] + due_date
-        status = getGradingProgress(str(course), assignment['id'], headers)
-        results[name] = list(status.values())
-    surveyGradingProgress(results, category_names)
-    plt.show()
-
 def textReport(course_name, course_num): 
     print('---' + course_name + '---\n\n')
     print('\n')
@@ -199,8 +113,8 @@ def textReport(course_name, course_num):
 def getSubmissions(course, headers): 
     assignments = getAllAssignments(course, headers)
     for assignment in assignments:
+        name = assignment['name']
         if assignment['has_submitted_submissions']: 
-            name = assignment['name']
             submissions = getScores(course, assignment['id'], headers)
             for submission in submissions:
                 score = submission['score']
@@ -211,6 +125,8 @@ def getSubmissions(course, headers):
                 section_scores[course] = section_scores.get(course, {})
                 section_scores[course][name] = section_scores[course].get(name, {})
                 section_scores[course][name][score] = section_scores[course][name].get(score, 0) + 1
+        else: 
+            assignment_scores[name] = {}
 
 def setup(f, course_name): 
     f.write("\documentclass{article}\n")
@@ -222,7 +138,7 @@ def setup(f, course_name):
     f.write(r"\usepackage{subfig}" + "\n")
     f.write(r"\usepackage[top=1in, bottom=1in, left=1in, right=1in, "+
             "marginparsep=0.15in]{geometry}" + "\n")
-    f.write(r"\title{" + course_name + "\n" + r" Grading Report}" + "\n")
+    f.write(r"\title{" + course_name + r" Grading Report}" + "\n")
     f.write(r"\date{"+ datetime.now().strftime("%m/%d/%Y, %H:%M:%S EDT") + r"}" + "\n")
     f.write(r"\author{}" + "\n")
     f.write(r"\begin{document} \maketitle" + "\n")
@@ -234,8 +150,8 @@ def writeGradingProgress(f, course_num, section, headers):
     results = {}
     toReturn = []
     for assignment in assignments:
+        toReturn.append(assignment)
         if assignment['min_score'] != None: 
-            toReturn.append(assignment)
             name = assignment['title']
             status = getGradingProgress(course_num, assignment['assignment_id'], headers)
             results[name] = list(status.values())
@@ -300,16 +216,20 @@ def writeDistribution(f, course_num, assignment_name, max):
     f.write(r"\includegraphics[width=6in]{fig/"+figname+r".png}" + "\n")
     # surveyDistribution(f, data, max, figname)
     plt.clf() 
+    f.write(r"\begin{FlushLeft}" + "\n")
     mean_all = mean(assignment_scores[assignment_name])
     mean_spec = mean(section_scores[course_num][assignment_name])
     std_all = std(assignment_scores[assignment_name], mean_all) ** .5
     std_spec = std(section_scores[course_num][assignment_name], mean_spec) ** .5
-    f.write(r'Average: ' + str("{:.2f}".format(mean_all)) + "\n")
-    f.write(r'Average: ' + str("{:.2f}".format(mean_spec)) + "\n")
+    f.write(r'Course average: ' + str("{:.2f}".format(mean_all)) + "\n")
     f.write(r'\linebreak' + "\n")
-    f.write(r'Standard deviation: ' + str("{:.2f}".format(std_all)) + "\n")
-    f.write(r'Standard deviation: ' + str("{:.2f}".format(std_spec)) + "\n")
+    f.write(r'Section average: ' + str("{:.2f}".format(mean_spec)) + "\n")
     f.write(r'\linebreak' + "\n")
+    f.write(r'Course standard deviation: ' + str("{:.2f}".format(std_all)) + "\n")
+    f.write(r'\linebreak' + "\n")
+    f.write(r'Section standard deviation: ' + str("{:.2f}".format(std_spec)) + "\n")
+    f.write(r'\linebreak' + "\n")
+    f.write(r"\end{FlushLeft}" + "\n")
 
 def writeOneDistribution(f, fig, course_num, section, assignment_name, max, index): 
     st = 1
@@ -386,10 +306,17 @@ def writeFile(courses, course_num, course_name, section_num, headers):
         # if None, write all in one doc 
         for assignment in assignments: 
             if assignment['title'] in section_scores[course_num]: 
-                max = int(assignment['points_possible'])
-                if max == 0: 
-                    continue
+                if assignment['due_at'] != None:
+                    due_date = '\n' + assignment['due_at'].strftime("%m/%d/%Y, %H:%M:%S")
+                f.write(r'\linebreak' + "\n")
+                f.write(r"" + due_date + "\n")
                 writeAssignment(f, course_num, assignment['title'], assignment['assignment_id'], headers)
+                if int(assignment['points_possible']) == 0: 
+                    f.write(r"Current max score set to null." + "\n")
+                    continue
+                if assignment_scores[assignment['title']] == {}: 
+                    f.write(r"No grade data." + "\n")
+                    continue
                 writeDistribution(f, course_num, assignment['title'], max)
     else: 
         f.write(r"\section{Grading Progress}" + "\n")
@@ -409,8 +336,19 @@ def writeFile(courses, course_num, course_name, section_num, headers):
                 continue
             f.write(r"\section{" + assignment['title'] + "}" + "\n")
             f.write(r"\begin{FlushLeft}" + "\n")
+            if assignment['due_at'] != None:
+                due_date = '\n' + assignment['due_at'].strftime("%m/%d/%Y, %H:%M:%S")
+                f.write(r'\linebreak' + "\n")
+                f.write(r"" + due_date + "\n")
             if assignment['title'] in assignment_scores: 
-                writeOneDistribution(f, fig, course_num, 'All sections', assignment['title'], max, 1)
+                if int(assignment['points_possible']) == 0: 
+                    f.write(r"Current max score set to null." + "\n")
+                    continue
+                elif assignment_scores[assignment['title']] == {}: 
+                    f.write(r"No grade data." + "\n")
+                    continue
+                else: 
+                    writeOneDistribution(f, fig, course_num, 'All sections', assignment['title'], max, 1)
             else: 
                 continue
             fn = 1
