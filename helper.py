@@ -1,24 +1,24 @@
-import requests
-import json
-import time
-import asyncio
 from aiohttp import ClientSession
-import numpy as np
-import matplotlib.pyplot as plt
-from datetime import datetime
+import asyncio
 from datetime import date
+from datetime import datetime
 from datetime import timedelta
-import sys
+import json
+import matplotlib.pyplot as plt
+import numpy as np
 import os
 from pathlib import Path
 from pltHelper import *
+import requests
+import time
+from config import url
+import sys
 plt.rcParams.update({'figure.max_open_warning': 0})
 
 assignment_scores = {}
 section_scores = {}
 grading_progress = {}
 s = requests.Session() 
-url = "https://jhu.instructure.com/api/v1/courses/"
 
 async def getCourses(headers): 
     return await getResponse(url, headers)
@@ -253,7 +253,7 @@ def closeFile(f, latexFileName):
     f.close()
     os.system("pdflatex -output-directory=tex --interaction=batchmode "+latexFileName)
 
-async def assignmentBySection(f, course_num, courses, assignment): 
+async def assignmentBySections(f, course_num, courses, assignment): 
     fig = plt.figure(figsize=(8,12))
     f.write(r"\section{" + assignment['title'] + "}" + "\n")
     f.write(r"\begin{FlushLeft}" + "\n")
@@ -297,7 +297,7 @@ async def assignmentBySection(f, course_num, courses, assignment):
         f.write(r'\linebreak' + "\n")
     plt.close(fig)
 
-async def sectionByAssignment(f, course_num, assignment, section_num, headers): 
+async def assignmentBySection(f, course_num, assignment, section_num, headers): 
     if assignment['title'] in section_scores[course_num]: 
         due_date = None
         if assignment['due_at'] != None:
@@ -337,7 +337,7 @@ async def writeFile(courses, course_num, course_name, section_num, headers):
         print(end - start, "s\n")
         start = time.perf_counter()
         print("Creating grade distribution bar charts... ")
-        tasks = [asyncio.create_task(sectionByAssignment(f, course_num, assignment, section_num, headers)) for assignment in assignments] 
+        tasks = [asyncio.create_task(assignmentBySection(f, course_num, assignment, section_num, headers)) for assignment in assignments] 
         await asyncio.gather(*tasks)  
         end = time.perf_counter()
         print(end - start, "s\n")
@@ -352,7 +352,7 @@ async def writeFile(courses, course_num, course_name, section_num, headers):
         print(end - start, "s\n")
         start = time.perf_counter()
         print("Creating grade distribution bar charts... ")
-        tasks = [asyncio.create_task(assignmentBySection(f, course_num, courses, assignment)) for assignment in assignments] 
+        tasks = [asyncio.create_task(assignmentBySections(f, course_num, courses, assignment)) for assignment in assignments] 
         await asyncio.gather(*tasks)  
         end = time.perf_counter()
         print(end - start, "s\n")

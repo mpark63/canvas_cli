@@ -1,9 +1,9 @@
+import asyncio
+import inquirer
 from helper import *
 from pltHelper import *
-from sections import courses
-from sections import course_names
-import inquirer
-import asyncio
+from config import courses
+from config import course_names
 
 headers = {}
 course_name = ''
