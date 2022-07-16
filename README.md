@@ -45,7 +45,7 @@ A successful run will look as such:
 
 ```sh
 > user@user canvas_cli % python3 canvasCLI.py
-Canvas access code: 13044~SGDZzzWSvytpvQXcIEhtzqCIdSq4I0CtUcbqVaI8mK1GBihXsD9sm2yJ8qjtYa6Y
+Canvas access code: 12394~SdDZzwzWSvytpvQXsdkDSKaLdsk3fAkjf9dfsnc4Sknal5skjd
 
 [?] Welcome, choose an option : Find your course
  > Find your course
