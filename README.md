@@ -13,8 +13,7 @@ For a sample document, please see ```EN.500.130_Biomedical_Engineering_Innovatio
 
 ### Note on tech
 
-Canvas CLI depends on a number of open source projects such as pdfTeX, asyncio, matplotlib, and inquirer among others. Clone the repository and within the /canvas_cli directory, install the dependencies by running: 
-```pipenv install```
+Canvas CLI depends on a number of open source projects such as pdfTeX, asyncio, matplotlib, and inquirer among others. Clone the repository and within the /canvas_cli directory, install the dependencies by running: ```pipenv install```. Should you encounter the ```Too many open files``` error, please run ```ulimit -Sn 10000```. 
 
 ### Tutorial
 
