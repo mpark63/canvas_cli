@@ -5,17 +5,17 @@ from pltHelper import *
 from config import courses
 from config import course_names
 
-headers = {}
+headers = {}            # for requests
 course_name = ''
-isPDF = False
 course_num = 1234
-menu = True 
 
+# prompt for canvas access code and set headers 
 def inputAuthorization(): 
     access_code = input("Canvas access code: ")
     headers['Authorization'] = 'Bearer ' + access_code
     print('\n')
 
+# print options to select one or multiple sections of a course  
 def welcomeMenu(): 
     answers = inquirer.prompt([
         inquirer.List(
@@ -57,11 +57,13 @@ def welcomeMenu():
         course_name = '' + course_num
     return course_name, course_nums, course_num, section_num
 
+# async function to open interactive menu
 async def main():
     inputAuthorization()
     [course_name, course_nums, course_num, section_num] = welcomeMenu()
     await writeFile(course_nums, course_num, course_name, section_num, headers)
 
+# call async main function as asyncio event 
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())

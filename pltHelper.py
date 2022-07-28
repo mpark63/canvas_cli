@@ -1,11 +1,12 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+# return stacked bar graph of grading progress 
 def surveyGradingProgress(results, category_names):
     # https://matplotlib.org/3.1.1/gallery/lines_bars_and_markers/horizontal_barchart_distribution.html
     labels = list(results.keys())
     if len(results) > 20: 
-        height = 15
+        height = 13
     else: 
         height = 8
     data = np.array(list(results.values()))
